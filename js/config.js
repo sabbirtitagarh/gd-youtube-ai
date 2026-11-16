@@ -69,10 +69,10 @@
         { label: 'WhatsApp', icon: '💬', url: 'https://wa.me/919339287525' }
       ],
       links: [
-        { label: 'Enroll Now - GD Tech Academy', url: 'https://gdtechacademy.blogspot.com/' },
+        { label: 'Hire Me', url: 'https://sabbirhelp.blogspot.com/' },
         { label: 'Quiz Time', url: 'https://gdquizhub.blogspot.com/' },
         { label: 'Grab Your Place (Registration)', url: 'https://gdtechregistration.blogspot.com/' },
-        { label: "Student's Login", url: 'https://login.feemitra.org/institute/gd-tech-academy/' }
+        { label: "Typing Karo", url: 'https://gdtyping.blogspot.com/' }
       ]
     }
   };
