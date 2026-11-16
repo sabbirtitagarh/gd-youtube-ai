@@ -1,0 +1,24 @@
+{
+  "name": "GD YouTube AI - Content Package Generator",
+  "short_name": "GD YouTube AI",
+  "description": "Sirf video title do - AI se SEO titles, description, hashtags, keywords, thumbnail aur quiz. GD TECH ACADEMY.",
+  "id": "./",
+  "start_url": "./?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B1F4A",
+  "theme_color": "#0B1F4A",
+  "lang": "en-IN",
+  "categories": ["education", "productivity", "utilities"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "New Content Package", "short_name": "Create", "url": "./#/generate", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "History", "short_name": "History", "url": "./#/history", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
