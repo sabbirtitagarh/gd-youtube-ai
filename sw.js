@@ -1,5 +1,5 @@
 /* GD YouTube AI - service worker (offline shell). API/Google calls kabhi cache nahi hote. */
-const VERSION = 'gdyt-v1.1.0';
+const VERSION = 'gdyt-v1.1.1';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/config.js', 'js/prompt.js', 'js/ai.js', 'js/thumb.js', 'js/drive.js', 'js/app.js',
