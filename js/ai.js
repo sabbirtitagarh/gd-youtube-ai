@@ -4,6 +4,7 @@
    ========================================================== */
 (function (root) {
   var CFG = root.GD || {};
+  var BUILTIN_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'];
 
   /* ---------- helpers ---------- */
   function clean(s) {
@@ -223,13 +224,15 @@
     if (code === 401 || code === 403) return 'API key allowed nahi hai ya galat hai. Settings me dobara check karein.';
     if (code === 429) return 'Free limit ya speed limit ho gayi. Thodi der ruk kar try karein.';
     if (code >= 500) return 'Google AI server busy hai. Thodi der baad try karein.';
+    if (code === 404) return 'Ye model aapki key par available nahi hai. Settings me "Available models dekhein" se sahi model chunein.';
     return 'AI error (' + code + ')' + (msg ? ': ' + msg : '');
   }
 
   async function callOwnKey(apiKey, title, fixHint, modelOverride) {
     var models = dedupe(
-      [modelOverride || CFG.DEFAULT_MODEL].concat(CFG.FALLBACK_MODELS || []).filter(Boolean)
+      [modelOverride || CFG.DEFAULT_MODEL].concat(CFG.FALLBACK_MODELS || []).concat(BUILTIN_MODELS).filter(Boolean)
     );
+    var tried = [];
     var prompt = buildPrompt(title, fixHint);
     var lastErr = null;
     for (var i = 0; i < models.length; i++) {
@@ -274,6 +277,7 @@
       }
       var msg = body && body.error && body.error.message ? body.error.message : '';
       lastErr = new Error(friendlyHttp(res.status, msg));
+      tried.push(models[i] + ': ' + res.status + (msg ? ' ' + clean(msg).slice(0, 110) : ''));
       // model nahi mila / rate limit -> next model try
       if (res.status === 404 || res.status === 429 || res.status === 400) {
         if (res.status === 400 && /API key/i.test(msg)) throw lastErr;
@@ -281,7 +285,36 @@
       }
       throw lastErr;
     }
+    if (lastErr && tried.length) lastErr = new Error(lastErr.message + ' [' + tried.join(' | ').slice(0, 380) + ']');
     throw lastErr || new Error('AI response nahi mila.');
+  }
+
+  async function listModels(apiKey) {
+    var out = [];
+    var token = '';
+    for (var p = 0; p < 5; p++) {
+      var url = 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=200' + (token ? '&pageToken=' + encodeURIComponent(token) : '');
+      var res;
+      try {
+        res = await fetch(url, { headers: { 'x-goog-api-key': apiKey } });
+      } catch (e) {
+        throw new Error('Internet connection check karein.');
+      }
+      var body = null;
+      try { body = await res.json(); } catch (e) {}
+      if (!res.ok) throw new Error(friendlyHttp(res.status, body && body.error && body.error.message));
+      (body.models || []).forEach(function (m) {
+        var id = String(m.name || '').replace(/^models\//, '');
+        var methods = m.supportedGenerationMethods || [];
+        if (methods.indexOf('generateContent') < 0) return;
+        if (!/^gemini-/.test(id)) return;
+        if (/image|tts|live|audio|embedding|robotics|computer-use|transcribe|veo|imagen/i.test(id)) return;
+        out.push(id);
+      });
+      token = body.nextPageToken || '';
+      if (!token) break;
+    }
+    return out;
   }
 
   async function callShared(token, title, fixHint) {
@@ -380,6 +413,7 @@
 
   var API = {
     generatePackage: generatePackage,
+    listModels: listModels,
     normalize: normalize,
     parseJson: parseJson,
     buildPrompt: buildPrompt,

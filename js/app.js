@@ -12,6 +12,8 @@
   var LS_SET = 'gdyt.settings';
   var LS_HIST = 'gdyt.history';
   var MAX_HISTORY = 60;
+  var LS_ADMIN = 'gdyt.admin';
+  var APP_BUILD = '1.1.2';
 
   var state = {
     page: 'home',
@@ -79,7 +81,7 @@
     return {
       mode: sharedReady ? 'shared' : 'own',
       apiKey: '',
-      model: GD.DEFAULT_MODEL,
+      model: 'gemini-3.5-flash-lite',
       theme: (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light',
       palette: 'ai',
       layout: 'ai',
@@ -475,7 +477,7 @@
           '<p class="muted" style="margin-top:8px">History aur thumbnails aapke apne Drive ke "' + esc(GD.DRIVE_FOLDER_NAME) + '" folder me save hote hain. App sirf apni banayi files dekh sakta hai.</p>' +
           '<div class="row"><button class="btn ghost sm" id="openDrive">📂 Folder kholein</button><button class="btn danger sm" id="signOut">Sign out</button></div>'
         : '<p class="muted">Google se sign in karein. Aapka data sirf <b>aapke apne Google Drive</b> me store hoga - owner ke paas nahi.</p>' +
-          '<button class="btn" id="signIn">🔐 Sign in with Google</button>' +
+          '<button class="btn" id="signIn">🔐 Sign in with Google</button><div class="notice" id="signErr" style="display:none;margin-top:10px"></div>' +
           (DR.configured() ? '' : '<p class="notice" style="margin-top:10px">Admin setup baaki hai: js/config.js me GOOGLE_CLIENT_ID daalein.</p>')) +
       '</div>' +
 
@@ -490,15 +492,20 @@
       '<p class="muted" style="margin-top:6px">Key sirf is device ke browser me rehti hai. <a href="' + esc(GD.GET_KEY_URL) + '" target="_blank" rel="noopener">Free key yahan se lein ↗</a></p>' +
       '<label class="lbl" for="model" style="margin-top:8px">Model</label>' +
       '<input type="text" id="model" value="' + esc(s.model) + '" />' +
+      '<button class="btn ghost sm" id="listModelsBtn" style="margin-top:8px">🔎 Available models dekhein</button><div id="modelsOut" class="chips" style="margin-top:8px"></div>' +
       '<div style="height:10px"></div><button class="btn" id="saveSet">Save Settings</button></div>' +
 
+      '<div class="card"><h2>🩺 Connection Check</h2><p class="muted">Login ya server me problem ho to ye chalayein. Ye bata dega ki kya galat set hai.</p>' +
+      '<button class="btn" id="diagBtn">Check chalayein</button><div id="diagOut" style="margin-top:10px"></div></div>' +
       '<div class="card"><h2>🎨 App</h2><button class="btn ghost" id="themeBtn2">Theme: ' + (s.theme === 'dark' ? 'Dark → Light' : 'Light → Dark') + '</button>' +
       '<div style="height:8px"></div><button class="btn amber" id="installBtn">📲 Install App</button>' +
+      '<div style="height:8px"></div><button class="btn ghost" id="forceBtn">🔄 App ko force update karein</button>' +
       '<div style="height:8px"></div><button class="btn danger" id="clearBtn">Is device ka local data clear karein</button></div>' +
 
       '<div class="card"><h2>ℹ️ About App</h2>' +
       '<div class="kv"><span>App</span><b>' + esc(GD.APP.name) + '</b></div>' +
       '<div class="kv"><span>Version</span><b>' + esc(GD.APP.version) + '</b></div>' +
+      '<div class="kv"><span>Build (code)</span><b>' + esc(APP_BUILD) + '</b></div>' +
       '<div class="kv"><span>Brand</span><b>' + esc(O.brand) + '</b></div></div>';
 
     $all('input[name="mode"]', el).forEach(function (r) {
@@ -507,13 +514,30 @@
         $all('.seg label', el).forEach(function (l) { l.classList.toggle('sel', l.querySelector('input').checked); });
       };
     });
+    $('#listModelsBtn').onclick = async function () {
+      var key = $('#apiKey').value.trim() || state.settings.apiKey;
+      var out = $('#modelsOut');
+      if (!key) { toast('Pehle Gemini API key daalein', true); return; }
+      out.innerHTML = '<span class="muted">Load ho raha hai…</span>';
+      try {
+        var list = await AI.listModels(key);
+        out.innerHTML = list.length
+          ? list.map(function (id) { return '<button class="chip" data-m="' + esc(id) + '" style="border:0;cursor:pointer">' + esc(id) + '</button>'; }).join('')
+          : '<span class="muted">Koi model nahi mila.</span>';
+        $all('[data-m]', out).forEach(function (b) {
+          b.onclick = function () { $('#model').value = b.getAttribute('data-m'); toast('Model chuna. "Save Settings" dabayein'); };
+        });
+      } catch (e) { out.innerHTML = ''; toast(e.message, true); }
+    };
     $('#saveSet').onclick = function () {
       state.settings.apiKey = $('#apiKey').value.trim();
-      state.settings.model = $('#model').value.trim() || GD.DEFAULT_MODEL;
+      state.settings.model = $('#model').value.trim() || 'gemini-3.5-flash-lite';
       saveSettings(); toast('Settings save ho gayi ✅');
     };
     $('#themeBtn2').onclick = toggleTheme;
     $('#installBtn').onclick = doInstall;
+    $('#forceBtn').onclick = forceUpdate;
+    $('#diagBtn').onclick = runDiagnostics;
     $('#clearBtn').onclick = function () {
       if (!confirm('Local history, settings aur API key delete hongi. Drive ka data safe rahega. Continue?')) return;
       try { localStorage.removeItem(LS_HIST); localStorage.removeItem(LS_SET); } catch (e) {}
@@ -522,16 +546,28 @@
     var si = $('#signIn');
     if (si) si.onclick = async function () {
       si.disabled = true;
+      var box = $('#signErr');
+      if (box) box.style.display = 'none';
       try {
         await DR.signIn();
-        await syncFromDrive(true);
-        toast('Google Drive connect ho gaya ✅');
+        var derr = DR.getDriveError();
+        if (!derr) await syncFromDrive(true);
+        await refreshAdminFlag();
         updateNav();
         renderSettings();
-      } catch (e) { toast(e.message, true); si.disabled = false; }
+        if (derr) toast('Login ho gaya, par Drive me problem: ' + derr, true);
+        else toast('Google Drive connect ho gaya ✅');
+      } catch (e) {
+        if (box) {
+          box.innerHTML = '<b>Login nahi hua:</b> ' + esc(e.message) + '<br><small>Neeche "Connection Check" chalayein aur uski report bhejein.</small>';
+          box.style.display = 'block';
+        }
+        toast(e.message, true);
+        si.disabled = false;
+      }
     };
     var so = $('#signOut');
-    if (so) so.onclick = function () { DR.signOut(); state.credits = null; toast('Sign out ho gaye'); updateNav(); renderSettings(); };
+    if (so) so.onclick = function () { DR.signOut(); state.credits = null; try { localStorage.removeItem(LS_ADMIN); } catch (e) {} toast('Sign out ho gaye'); updateNav(); renderSettings(); };
     var od = $('#openDrive');
     if (od) od.onclick = function () { window.open(DR.folderUrl(), '_blank', 'noopener'); };
   }
@@ -559,13 +595,32 @@
   /* ---------------- ADMIN (owner only) ----------------
      Yahan ka check sirf UI chhupane ke liye hai. Asli suraksha server par hai:
      har admin request par Apps Script Google token se email verify karta hai. */
+  function getAdminFlag() {
+    try { return JSON.parse(localStorage.getItem(LS_ADMIN)); } catch (e) { return null; }
+  }
+  function setAdminFlag(email, isAdmin) {
+    try { localStorage.setItem(LS_ADMIN, JSON.stringify({ email: String(email).toLowerCase(), isAdmin: !!isAdmin })); } catch (e) {}
+  }
+  // Server (ADMIN_EMAILS) ka jawab sabse upar; server se jawab na mila ho to config ka email hint
   function isOwner() {
     var u = DR.getUser();
     if (!u || !u.email) return false;
+    var email = String(u.email).toLowerCase();
+    var f = getAdminFlag();
+    if (f && f.email === email) return !!f.isAdmin;
     var list = (GD.ADMIN_EMAILS && GD.ADMIN_EMAILS.length ? GD.ADMIN_EMAILS : [O.email]).map(function (x) {
       return String(x).toLowerCase();
     });
-    return list.indexOf(String(u.email).toLowerCase()) >= 0;
+    return list.indexOf(email) >= 0;
+  }
+  async function refreshAdminFlag() {
+    if (!DR.isSignedIn() || !DR.hasValidToken()) return null;
+    try {
+      var out = await adminCall('whoami');
+      setAdminFlag(out.email, out.isAdmin);
+      updateNav();
+      return out;
+    } catch (e) { return null; }
   }
 
   function updateNav() {
@@ -649,8 +704,40 @@
       '<label class="lbl" for="admKey" style="margin-top:10px">Naya Gemini API key (optional)</label>' +
       '<input type="password" id="admKey" autocomplete="off" placeholder="' + (c.keySet ? 'Key set hai. Khaali chhodein to wahi rahegi' : 'AIza...') + '">' +
       '<p class="muted" style="margin-top:6px">Key kabhi wapas dikhayi nahi jaati, sirf badli ja sakti hai.</p>' +
-      '<div style="height:10px"></div><button class="btn" id="admSave">Save Admin Settings</button></div>';
+      '<div style="height:10px"></div><button class="btn" id="admSave">Save Admin Settings</button></div>' +
+      '<div class="card"><h3>🔎 Models check</h3><p class="muted">Aapki Gemini key par kaun se models chal rahe hain, yahan dekhein aur test karein. "Use" dabane par model list ke upar set hota hai, phir upar "Save Admin Settings" dabayein.</p>' +
+      '<button class="btn ghost" id="admModelsBtn">Available models dekhein</button><div id="admModelsOut" style="margin-top:10px"></div></div>';
     $('#admRefresh').onclick = renderAdmin;
+    $('#admModelsBtn').onclick = async function () {
+      var out = $('#admModelsOut');
+      out.innerHTML = '<p class="muted">Load ho raha hai…</p>';
+      try {
+        var r = await adminCall('adminModels');
+        if (!r.models.length) { out.innerHTML = '<p class="muted">Koi model nahi mila.</p>'; return; }
+        out.innerHTML = r.models.map(function (m) {
+          return '<div class="mrow"><div class="mhead"><b>' + esc(m.id) + '</b><button class="btn ghost sm" data-test="' + esc(m.id) +
+            '">Test</button><button class="btn sm" data-use="' + esc(m.id) + '">Use</button></div><small class="mres"></small></div>';
+        }).join('');
+        $all('[data-test]', out).forEach(function (b) {
+          b.onclick = async function () {
+            var res = b.closest('.mrow').querySelector('.mres');
+            res.textContent = 'Test ho raha hai…';
+            try {
+              var t = await adminCall('adminTestModel', { model: b.getAttribute('data-test') });
+              res.textContent = t.works ? '✅ Chal raha hai' : '❌ ' + t.detail;
+            } catch (e) { res.textContent = '❌ ' + e.message; }
+          };
+        });
+        $all('[data-use]', out).forEach(function (b) {
+          b.onclick = function () {
+            var id = b.getAttribute('data-use');
+            var cur = $('#admModels').value.split(',').map(function (x) { return x.trim(); }).filter(Boolean).filter(function (x) { return x !== id; });
+            $('#admModels').value = [id].concat(cur).slice(0, 4).join(',');
+            toast(id + ' list ke upar set hua. "Save Admin Settings" dabayein');
+          };
+        });
+      } catch (e) { out.innerHTML = '<p class="muted">❌ ' + esc(e.message) + '</p>'; }
+    };
     $('#admSave').onclick = async function () {
       var btn = this;
       btn.disabled = true;
@@ -668,6 +755,70 @@
         drawAdmin(el, out);
       } catch (e) { toast(e.message, true); btn.disabled = false; }
     };
+  }
+
+  async function runDiagnostics() {
+    var box = $('#diagOut');
+    box.innerHTML = '<p class="muted">Check ho raha hai…</p>';
+    var d = DR.diagnose();
+    var rows = [];
+    function add(ok, label, tip) { rows.push({ ok: ok, label: label, tip: tip || '' }); }
+    add(true, 'App build: ' + APP_BUILD);
+    add(true, 'Site origin: ' + d.origin + d.path + ' (Google Cloud ke "Authorized JavaScript origins" me sirf ' + d.origin + ' hona chahiye)');
+    add(d.secure, 'HTTPS secure connection', 'App ko https:// link se kholein.');
+    add(d.clientIdSet, 'Client ID config.js me set hai', 'js/config.js me GOOGLE_CLIENT_ID daalein aur GitHub par upload karein.');
+    add(d.clientIdFormatOk, 'Client ID format: ' + d.clientIdMasked, 'Client ID "1234-abc.apps.googleusercontent.com" jaisa hona chahiye (Client secret ya project ID nahi).');
+    add(d.gisLoaded, 'Google Sign-In script load hui', 'Internet, ad-blocker ya DNS check karein.');
+    add(!d.inAppBrowser, 'Normal browser me khula hai', 'WhatsApp/Telegram/Facebook ke andar se na kholein. Link ko Chrome me kholein.');
+    var url = GD.APPS_SCRIPT_URL;
+    if (!url || /PASTE_/.test(url)) {
+      add(false, 'Apps Script URL set nahi hai', 'js/config.js me APPS_SCRIPT_URL daalein.');
+    } else {
+      try {
+        var r = await fetch(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'action=status');
+        var j = await r.json();
+        add(!!j.ok, 'Apps Script server chal raha hai' + (j.ok ? ' (shared AI: ' + (j.sharedKeyEnabled ? 'ON' : 'OFF ya key missing') + ')' : ''), 'Deploy: Execute as Me, Access Anyone, URL /exec par khatam.');
+      } catch (e) {
+        add(false, 'Apps Script server se connect nahi hua', 'Web app access "Anyone" ho aur URL sahi ho.');
+      }
+    }
+    add(DR.isSignedIn(), 'Google sign-in: ' + (DR.isSignedIn() ? DR.getUser().email : 'abhi sign in nahi'), 'Upar "Sign in with Google" dabayein. Error aaye to uska exact text bhejein.');
+    if (DR.isSignedIn()) {
+      var de = DR.getDriveError();
+      add(!de, 'Google Drive folder' + (de ? '' : ' ready'), de);
+      if (DR.hasValidToken()) {
+        try {
+          var w = await adminCall('whoami');
+          setAdminFlag(w.email, w.isAdmin);
+          updateNav();
+          add(true, 'Server ne verify kiya: ' + w.email + ' • Admin: ' + (w.isAdmin ? 'HAAN' : 'NAHI'),
+            w.isAdmin ? '' : 'Admin banna ho to Apps Script Script Property ADMIN_EMAILS me ye email daalein.');
+          if (!w.isAdmin) rows[rows.length - 1].ok = false;
+        } catch (e) {
+          add(false, 'Server token verify fail: ' + e.message, 'Script Property GOOGLE_CLIENT_ID wahi hona chahiye jo config.js me hai. Apps Script me naya version deploy karein.');
+        }
+      } else add(true, 'Token expire hai. Server check ke liye dobara sign in karein.');
+    }
+    var report = rows.map(function (x) { return (x.ok ? '[OK] ' : '[X] ') + x.label + (!x.ok && x.tip ? ' -> ' + x.tip : ''); }).join('\n');
+    box.innerHTML = '<div class="diag">' + rows.map(function (x) {
+      return '<div class="kv"><span>' + (x.ok ? '✅' : '❌') + ' ' + esc(x.label) +
+        (!x.ok && x.tip ? '<br><small class="muted">👉 ' + esc(x.tip) + '</small>' : '') + '</span></div>';
+    }).join('') + '</div><div style="height:8px"></div><button class="btn ghost sm" id="diagCopy">📋 Report copy karein</button>';
+    $('#diagCopy').onclick = function () { copyText(report, this); };
+  }
+
+  async function forceUpdate() {
+    try {
+      if ('serviceWorker' in navigator) {
+        var regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(function (r) { return r.unregister(); }));
+      }
+      if (window.caches) {
+        var keys = await caches.keys();
+        await Promise.all(keys.map(function (k) { return caches.delete(k); }));
+      }
+    } catch (e) {}
+    location.reload();
   }
 
   /* ---------------- PWA install ---------------- */
@@ -700,6 +851,7 @@
       new Date().getFullYear() + ' ' + esc(O.name) + ' • Made with ❤️ for Education';
     $all('.nav button').forEach(function (b) { b.onclick = function () { go(b.getAttribute('data-go')); }; });
     updateNav();
+    if (DR.isSignedIn() && DR.hasValidToken()) refreshAdminFlag();
     document.addEventListener('click', function (e) {
       var a = e.target.closest && e.target.closest('[data-go]');
       if (a && !a.closest('.nav')) { e.preventDefault(); go(a.getAttribute('data-go')); }
