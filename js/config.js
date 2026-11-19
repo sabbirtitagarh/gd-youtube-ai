@@ -16,8 +16,8 @@
     },
 
     // ---- Setup values (guide me bataya gaya hai) ----
-    GOOGLE_CLIENT_ID: 'PASTE_YOUR_OAUTH_CLIENT_ID.apps.googleusercontent.com',
-    APPS_SCRIPT_URL: 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL',
+    GOOGLE_CLIENT_ID: '1061287154307-7vjhbmfhh8gs3egabsuav60o76cm3d1h.apps.googleusercontent.com',
+    APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyYNzC1la5QRCv03VkWxrFahkEvum_Zpe8b_6QVfEkXIjXRVOI88rpLH57YkbHCDSYh/exec',
 
     // ---- Google Drive storage (user ke apne Drive me) ----
     DRIVE_FOLDER_NAME: 'GD YouTube AI',
