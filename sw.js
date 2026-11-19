@@ -1,5 +1,7 @@
-/* GD YouTube AI - service worker (offline shell). API/Google calls kabhi cache nahi hote. */
-const VERSION = 'gdyt-v1.1.1';
+/* GD YouTube AI - service worker (offline shell).
+   Network-first: update deploy karte hi naya code mil jata hai; offline par cache se chalta hai.
+   Google/API calls kabhi cache nahi hote. */
+const VERSION = 'gdyt-v1.1.2';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/config.js', 'js/prompt.js', 'js/ai.js', 'js/thumb.js', 'js/drive.js', 'js/app.js',
@@ -9,7 +11,13 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(VERSION)
+      .then((c) => Promise.all(SHELL.map((u) =>
+        fetch(new Request(u, { cache: 'reload' })).then((r) => (r.ok ? c.put(u, r) : null)).catch(() => null)
+      )))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -24,34 +32,32 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-
-  // Sirf same-origin app files + Google Fonts handle karo
   const isFont = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';
   if (url.origin !== self.location.origin && !isFont) return;
 
-  // Page navigation: network first, offline par cached index
-  if (req.mode === 'navigate') {
+  // Fonts: cache-first
+  if (isFont) {
     e.respondWith(
-      fetch(req).then((res) => {
-        const copy = res.clone();
-        caches.open(VERSION).then((c) => c.put('index.html', copy));
+      caches.match(req).then((hit) => hit || fetch(req).then((res) => {
+        if (res && res.status === 200) { const c = res.clone(); caches.open(VERSION).then((x) => x.put(req, c)); }
         return res;
-      }).catch(() => caches.match('index.html').then((r) => r || caches.match('./')))
+      }))
     );
     return;
   }
 
-  // Static: stale-while-revalidate
+  // App files: network-first (HTTP cache bypass), offline par cache
   e.respondWith(
-    caches.match(req).then((cached) => {
-      const net = fetch(req).then((res) => {
+    fetch(new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' }))
+      .then((res) => {
         if (res && res.status === 200) {
           const copy = res.clone();
-          caches.open(VERSION).then((c) => c.put(req, copy));
+          caches.open(VERSION).then((c) => c.put(req.mode === 'navigate' ? 'index.html' : req, copy));
         }
         return res;
-      }).catch(() => cached);
-      return cached || net;
-    })
+      })
+      .catch(() =>
+        caches.match(req).then((hit) => hit || (req.mode === 'navigate' ? caches.match('index.html') : undefined))
+      )
   );
 });
